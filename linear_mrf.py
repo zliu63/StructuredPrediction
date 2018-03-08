@@ -107,7 +107,10 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
-        return None
+        ret = np.zeros((self.width*self.height,2))
+        ret[:,0] = (img == 0).astype(float).reshape(self.width*self.height)
+        ret[:,1] = (img == 1).astype(float).reshape(self.width*self.height)
+        return ret
 
     def get_pairwise_features(self):
         '''Calculates the full matrix of pairwise features.
@@ -137,7 +140,10 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
-        return None
+        ret = np.zeros((len(self.pairs),4))
+        ret[:,0] = np.ones(len(self.pairs))
+        ret[:,3] = np.ones(len(self.pairs))
+        return ret
 
     def calculate_unary_potentials(self, unary_features):
         '''Calculates the full matrix of unary potentials for a provided
@@ -162,7 +168,7 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
-        return None
+        return self.unary_weight*unary_features
 
     def calculate_pairwise_potentials(self, pairwise_features):
         '''Calculates the full matrix of pairwise potentials for a provided
@@ -187,7 +193,7 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
-        return None
+        return self.pairwise_weight*pairwise_features
 
     def build_training_obj(self, img_features, unary_beliefs, pair_beliefs,
                            unary_potentials, pairwise_potentials):
@@ -211,10 +217,15 @@ class LinearMRF(object):
         Returns:
             (tf.Tensor): the training objective, which is a rank-0 tensor
         '''
-        obj = 0
+        obj = tf.Variable(0,dtype=tf.float32)
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
+        F_left= tf.reduce_sum(self.calculate_unary_potentials(img_features))
+        F_right=tf.reduce_sum(self.calculate_pairwise_potentials(self.get_pairwise_beliefs(img_features)))
+        F = F_left+F_right
+        for i in range(len(unary_beliefs)):
+            obj += (tf.cast(tf.reduce_sum(tf.multiply(unary_beliefs[i],unary_potentials[i])),dtype=tf.float32)+tf.cast(tf.reduce_sum(tf.multiply(pair_beliefs[i],pairwise_potentials[i])),dtype=tf.float32) - F)
         return obj
 
     def train(self, original_img, noisy_samples, lr, num_epochs,
@@ -418,6 +429,17 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
+        unorderd_list = list(range(0,unary_beliefs.shape[0]))
+        np.random.shuffle(unorderd_list)
+        for i in unorderd_list:
+            s0 = self.calculate_local_score(i,0,unary_beliefs,unary_pots,pairwise_pots)
+            s1 = self.calculate_local_score(i,1,unary_beliefs,unary_pots,pairwise_pots)
+            if s0<s1:
+                unary_beliefs[i][0] = 0
+                unary_beliefs[i][1] = 1
+                continue 
+            unary_beliefs[i][0] = 1
+            unary_beliefs[i][1] = 0
         return unary_beliefs
 
     def calculate_local_score(self, node, assignment, unary_beliefs,
@@ -449,6 +471,20 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
+        score += unary_potentials[node][assignment]
+        for neighbor in self.neighbors[node]:
+            if unary_beliefs[neighbor][0] == 1:
+                neighbor_belief = 0
+            else:
+                neighbor_belief = 1
+            if neighbor > node:
+                idx0 = self.pair_inds[(neighbor,node)]
+                idx1 = assignment*2+neighbor_belief
+                score += pairwise_potentials[idx0][idx1]
+                continue
+            idx0 = self.pair_inds[(neighbor,node)]
+            idx1 = neighbor_belief*2+assignment
+            score += pairwise_potentials[idx0][idx1]
         return score
 
     def check_convergence(self, new_unary_beliefs, old_unary_beliefs,
@@ -472,7 +508,17 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
-        return None
+        diff = 0
+        n = self.width*self.height
+        for i in range(n):
+            for j in range(new_unary_beliefs.shape[1]):
+                if new_unary_beliefs[i][j] == old_unary_beliefs[i][j]:
+                    continue
+                diff += 1
+                break
+        if diff/n < convergence_margin:
+            return True
+        return False
 
     def get_pairwise_beliefs(self, unary_beliefs):
         '''Generates the appropriate pairwise beliefs for a specified set of
@@ -499,4 +545,10 @@ class LinearMRF(object):
         #######################
         #IMPLEMENT THIS METHOD#
         #######################
+        for i in range(len(self.pairs)):
+            ind2 = self.pairs[i][0]
+            ind1 = self.pairs[i][1]
+            little_idx =  0 if unary_beliefs[ind2][0] == 1 else 1
+            big_idx = 0 if unary_beliefs[ind1][0] == 1 else 1
+            result[i][little_idx * 2 + big_idx] = 1
         return result
